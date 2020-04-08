@@ -228,6 +228,13 @@ func (s *LocalObserverServer) GetFlows(
 	ctx, cancel := context.WithCancel(server.Context())
 	defer cancel()
 
+	for _, f := range s.opts.OnGetFlows {
+		ctx, err = f.OnGetFlows(ctx, req)
+		if err != nil {
+			return err
+		}
+	}
+
 	filterList := append(filters.DefaultFilters, s.opts.OnBuildFilter...)
 	whitelist, err := filters.BuildFilterList(ctx, req.Whitelist, filterList)
 	if err != nil {
