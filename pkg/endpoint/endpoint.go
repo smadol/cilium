@@ -279,6 +279,12 @@ type Endpoint struct {
 
 	eventQueue *eventqueue.EventQueue
 
+	// skippedRegenerationLevel is the DatapathRegenerationLevel of the regeneration event that
+	// was skipped due to another regeneration event already being queued, as indicated by
+	// state. A lower-level current regeneration is bumped to this level to cover for the
+	// skipped regeneration levels.
+	skippedRegenerationLevel regeneration.DatapathRegenerationLevel
+
 	// DatapathConfiguration is the endpoint's datapath configuration as
 	// passed in via the plugin that created the endpoint, e.g. the CNI
 	// plugin which performed the plumbing will enable certain datapath
@@ -866,19 +872,14 @@ func (e *Endpoint) Update(cfg *models.EndpointConfigurationSpec) error {
 		for {
 			select {
 			case <-ticker.C:
-				if err := e.lockAlive(); err != nil {
+				regen, err := e.SetRegenerateStateIfAlive(regenCtx)
+				if err != nil {
 					return err
 				}
-				// Check endpoint state before attempting configuration update because
-				// configuration updates can only be applied when the endpoint is in
-				// specific states. See GH-3058.
-				stateTransitionSucceeded := e.setState(StateWaitingToRegenerate, regenCtx.Reason)
-				if stateTransitionSucceeded {
-					e.unlock()
+				if regen {
 					e.Regenerate(regenCtx)
 					return nil
 				}
-				e.unlock()
 			case <-timeout:
 				e.getLogger().Warning("timed out waiting for endpoint state to change")
 				return UpdateStateChangeError{fmt.Sprintf("unable to regenerate endpoint program because state transition to %s was unsuccessful; check `cilium endpoint log %d` for more information", StateWaitingToRegenerate, e.ID)}
@@ -1021,19 +1022,6 @@ func (e *Endpoint) leaveLocked(proxyWaitGroup *completion.WaitGroup, conf Delete
 	e.getLogger().Info("Removed endpoint")
 
 	return errors
-}
-
-// RegenerateWait should only be called when endpoint's state has successfully
-// been changed to "waiting-to-regenerate"
-func (e *Endpoint) RegenerateWait(reason string) error {
-	if !<-e.Regenerate(&regeneration.ExternalRegenerationMetadata{
-		Reason:            reason,
-		RegenerationLevel: regeneration.RegenerateWithDatapathRewrite,
-	}) {
-		return fmt.Errorf("error while regenerating endpoint."+
-			" For more info run: 'cilium endpoint get %d'", e.ID)
-	}
-	return nil
 }
 
 // GetContainerName returns the name of the container for the endpoint.
@@ -1778,6 +1766,10 @@ func (e *Endpoint) identityLabelsChanged(ctx context.Context, myChangeRev int) e
 	}
 
 	readyToRegenerate := false
+	regenMetadata := &regeneration.ExternalRegenerationMetadata{
+		Reason:            "updated security labels",
+		RegenerationLevel: regeneration.RegenerateWithDatapathRewrite,
+	}
 
 	// Regeneration is only triggered once the endpoint ID has been
 	// assigned. This ensures that on the initial creation, the endpoint is
@@ -1788,7 +1780,7 @@ func (e *Endpoint) identityLabelsChanged(ctx context.Context, myChangeRev int) e
 	// called, the controller calling identityLabelsChanged() will trigger
 	// the regeneration as soon as the identity is known.
 	if e.ID != 0 {
-		readyToRegenerate = e.setState(StateWaitingToRegenerate, "Triggering regeneration due to new identity")
+		readyToRegenerate = e.setRegenerateStateLocked(regenMetadata)
 	}
 
 	// Unconditionally force policy recomputation after a new identity has been
@@ -1798,10 +1790,7 @@ func (e *Endpoint) identityLabelsChanged(ctx context.Context, myChangeRev int) e
 	e.unlock()
 
 	if readyToRegenerate {
-		e.Regenerate(&regeneration.ExternalRegenerationMetadata{
-			Reason:            "updated security labels",
-			RegenerationLevel: regeneration.RegenerateWithDatapathRewrite,
-		})
+		e.Regenerate(regenMetadata)
 	}
 
 	return nil
@@ -2125,15 +2114,15 @@ func (e *Endpoint) GetProxyInfoByFields() (uint64, string, string, []string, str
 // program to be generated for the first time.
 // * otherwise, waits for the endpoint to complete its first full regeneration.
 func (e *Endpoint) RegenerateAfterCreation(ctx context.Context, syncBuild bool) error {
-	if err := e.lockAlive(); err != nil {
-		return fmt.Errorf("endpoint was deleted while processing the request")
+	regenMetadata := &regeneration.ExternalRegenerationMetadata{
+		Reason:            "Initial build on endpoint creation",
+		ParentContext:     ctx,
+		RegenerationLevel: regeneration.RegenerateWithDatapathRewrite,
 	}
-
-	build := e.getState() == StateReady
-	if build {
-		e.setState(StateWaitingToRegenerate, "Identity is known at endpoint creation time")
+	build, err := e.SetRegenerateStateIfAlive(regenMetadata)
+	if err != nil {
+		return err
 	}
-	e.unlock()
 
 	if build {
 		// Do not synchronously regenerate the endpoint when first creating it.
@@ -2149,11 +2138,7 @@ func (e *Endpoint) RegenerateAfterCreation(ctx context.Context, syncBuild bool) 
 		// is executed; if we waited for regeneration to be complete, including
 		// proxy configuration, this code would effectively deadlock addition
 		// of endpoints.
-		e.Regenerate(&regeneration.ExternalRegenerationMetadata{
-			Reason:            "Initial build on endpoint creation",
-			ParentContext:     ctx,
-			RegenerationLevel: regeneration.RegenerateWithDatapathRewrite,
-		})
+		e.Regenerate(regenMetadata)
 	}
 
 	// Wait for endpoint to be in "ready" state if specified in API call.

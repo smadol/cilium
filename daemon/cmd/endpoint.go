@@ -27,6 +27,7 @@ import (
 	"github.com/cilium/cilium/pkg/api"
 	"github.com/cilium/cilium/pkg/endpoint"
 	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
+	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/k8s"
 	k8sConst "github.com/cilium/cilium/pkg/k8s/apis/cilium.io"
 	"github.com/cilium/cilium/pkg/labels"
@@ -440,8 +441,14 @@ func (h *patchEndpointID) Handle(params PatchEndpointIDParams) middleware.Respon
 	}
 
 	if reason != "" {
-		if err := ep.RegenerateWait(reason); err != nil {
-			return api.Error(PatchEndpointIDFailedCode, err)
+		regenMetadata := &regeneration.ExternalRegenerationMetadata{
+			Reason:            reason,
+			RegenerationLevel: regeneration.RegenerateWithDatapathRewrite,
+		}
+		if !<-ep.Regenerate(regenMetadata) {
+			return api.Error(PatchEndpointIDFailedCode,
+				fmt.Errorf("error while regenerating endpoint."+
+					" For more info run: 'cilium endpoint get %d'", ep.ID))
 		}
 		// FIXME: Special return code to indicate regeneration happened?
 	}
