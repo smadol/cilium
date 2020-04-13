@@ -136,6 +136,12 @@ static __always_inline int handle_ipv6(struct __ctx_buff *ctx,
 		if (ret < 0)
 			return ret;
 	}
+#if defined(NO_REDIRECT)
+        /* Skip the stack, if we can lookup the right interface */
+        int ifindex = fib_lookup_ipv6(ip6);
+        if (ifindex > -1)
+                return redirect(ifindex, 0);
+#endif
 #if defined(ENCAP_IFINDEX) || defined(NO_REDIRECT)
 	/* See IPv4 case for NO_REDIRECT comments */
 	return CTX_ACT_OK;
@@ -242,6 +248,25 @@ static __always_inline int handle_ipv6(struct __ctx_buff *ctx,
 	return CTX_ACT_OK;
 }
 
+static __always_inline int fib_lookup_ipv6(struct ipv6hdr *ip6)
+{
+#ifdef BPF_HAVE_FIB_LOOKUP
+	struct bpf_fib_lookup fib_params = {};
+	int err;
+
+        fib_params.family = AF_INET6;
+        ipv6_addr_copy((union v6addr *) &fib_params.ipv6_src, (union v6addr *) &ip6->saddr);
+        ipv6_addr_copy((union v6addr *) &fib_params.ipv6_dst, (union v6addr *) &ip6->daddr);
+
+	err = fib_lookup(ctx, &fib_params, sizeof(fib_params),
+		    BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_OUTPUT);
+        if (err == 0) {
+                return fib_params.ifindex
+        }
+#endif
+        return -1;
+}
+
 __section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_FROM_LXC)
 int tail_handle_ipv6(struct __ctx_buff *ctx)
 {
@@ -324,6 +349,13 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 		if (ret < 0)
 			return ret;
 	}
+
+#if defined(NO_REDIRECT)
+        /* Skip the stack, if we can lookup the right interface */
+        int ifindex = fib_lookup_ipv4(ip4);
+        if (ifindex > -1)
+                return redirect(ifindex, 0);
+#endif
 #if defined(ENCAP_IFINDEX) || defined(NO_REDIRECT)
 	/* We cannot redirect a packet to a local endpoint in the direct
 	 * routing mode, as the redirect bypasses nf_conntrack table.
@@ -433,6 +465,24 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 #endif
 	return CTX_ACT_OK;
 #endif
+}
+
+static __always_inline int fib_lookup_ipv4(struct iphdr *ip4)
+{
+#ifdef BPF_HAVE_FIB_LOOKUP
+	struct bpf_fib_lookup fib_params = {};
+	int err;
+
+        fib_params.family = AF_INET;
+        fib_params.ipv4_src = ip4->saddr;
+        fib_params.ipv4_dst = ip4->daddr;
+
+	err = fib_lookup(ctx, &fib_params, sizeof(fib_params),
+		    BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_OUTPUT);
+        if (err == 0)
+                return fib_params.ifindex
+#endif
+        return -1;
 }
 
 __section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV4_FROM_LXC)
