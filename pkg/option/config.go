@@ -2170,25 +2170,28 @@ func (c *DaemonConfig) Validate() error {
 		}
 	}
 
-	policyMapMin := (1 << 8)
-	policyMapMax := (1 << 16)
-	if c.PolicyMapMaxEntries < policyMapMin {
-		return fmt.Errorf("specified PolicyMap max entries %d must exceed minimum %d",
-			c.PolicyMapMaxEntries, policyMapMin)
+	limit := defaults.PolicyMapMinSize
+	if c.PolicyMapMaxEntries < defaults.PolicyMapMinSize {
+		log.Warningf("specified PolicyMap maximum number for entries %d cannot be below %d, using %d instead",
+			c.PolicyMapMaxEntries, limit, limit)
+		c.PolicyMapMaxEntries = limit
 	}
-	if c.PolicyMapMaxEntries > policyMapMax {
-		return fmt.Errorf("specified PolicyMap max entries %d must not exceed maximum %d",
-			c.PolicyMapMaxEntries, policyMapMax)
+	limit = defaults.PolicyMapMaxSize
+	if c.PolicyMapMaxEntries > limit {
+		log.Warningf("specified PolicyMap maximum number for entries %d cannot be above %d, using %d instead",
+			c.PolicyMapMaxEntries, limit, limit)
+		c.PolicyMapMaxEntries = limit
 	}
-	fragmentsMapMin := (1 << 8)
-	fragmentsMapMax := (1 << 16)
-	if c.FragmentsMapEntries < fragmentsMapMin {
-		return fmt.Errorf("specified fragments tracking map max entries %d must exceed minimum %d",
-			c.FragmentsMapEntries, fragmentsMapMin)
+	if c.FragmentsMapEntries <= 0 {
+		c.EnableIPv4FragmentsTracking = false
+		return fmt.Errorf("specified number for entries in fragment-tracking map %d must be positive, use --enable-ipv4-fragments-tracking=false to disable fragments tracking",
+			c.FragmentsMapEntries)
 	}
-	if c.FragmentsMapEntries > fragmentsMapMax {
-		return fmt.Errorf("specified fragments tracking map max entries %d must not exceed maximum %d",
-			c.FragmentsMapEntries, fragmentsMapMax)
+	limit = defaults.PolicyMapMinSize
+	if c.FragmentsMapEntries > limit {
+		log.Warningf("specified number for entries in fragment-tracking map %d cannot be below %d, using %d instead",
+			c.FragmentsMapEntries, limit, limit)
+		c.FragmentsMapEntries = limit
 	}
 	// Validate that the KVStore Lease TTL value lies between a particular range.
 	if c.KVstoreLeaseTTL > defaults.KVstoreLeaseMaxTTL || c.KVstoreLeaseTTL < defaults.LockLeaseTTL {

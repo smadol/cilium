@@ -246,6 +246,14 @@ const (
 	// the endpoint could send/receive traffic to/from.
 	PolicyMapEntries = 16384 // Cilium 1.5 and earlier value
 
+	// PolicyMapMinSize is the minimum value to which the number of entries
+	// allowed in an endpoint's policymap can be configured.
+	PolicyMapMinSize = (1 << 8)
+
+	// PolicyMapMaxSize is the maximum value to which the number of entries
+	// allowed in an endpoint's policymap can be configured.
+	PolicyMapMaxSize = (1 << 16)
+
 	// K8sEventHandover enables use of the kvstore to optimize Kubernetes
 	// event handling by listening for k8s events in the operator and
 	// mirroring it into the kvstore for reduced overhead in large
@@ -370,4 +378,8 @@ const (
 	// FragmentsMapEntries is the default number of entries allowed in an
 	// the map used to track datagram fragments.
 	FragmentsMapEntries = 8192
+
+	// FragmentMapMaxSize is the maximum value to which the number of
+	// entries in a fragment-tracking map can be configured.
+	FragmentMapMaxSize = (1 << 16)
 )
