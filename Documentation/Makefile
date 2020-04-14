@@ -1,3 +1,4 @@
+include ../Makefile.defs
 include ../Makefile.quiet
 
 .PHONY: default clean builder-image cmdref epub latex html run-server stop-server
@@ -9,9 +10,9 @@ clean:
 
 builder-image:
 	$(QUIET)tar c requirements.txt Dockerfile \
-	  | docker build --tag cilium/docs-builder -
+	  | $(CONTAINER_ENGINE_FULL) build --tag cilium/docs-builder -
 
-DOCKER_RUN := docker container run --rm \
+DOCKER_RUN := $(CONTAINER_ENGINE_FULL) container run --rm \
 		--workdir /src/Documentation \
 		--volume $(CURDIR)/..:/src \
 		--user "$(shell id -u):$(shell id -g)" \
@@ -42,7 +43,7 @@ run-server: stop-server
 	# Work around Docker issue where this directory is created as root in
 	# the `--volume` parameter below. See also GH-10869.
 	$(QUIET)mkdir -p $(CURDIR)/_build/html/
-	$(QUIET)docker container run --rm \
+	$(QUIET)$(CONTAINER_ENGINE_FULL) container run --rm \
 		--detach \
 		--interactive \
 		--tty \
@@ -53,4 +54,4 @@ run-server: stop-server
 	@echo "$$(tput setaf 2)Running at http://localhost:$(DOCS_PORT)$$(tput sgr0)"
 
 stop-server:
-	-$(QUIET)docker container rm --force --volumes docs-cilium
+	-$(QUIET)$(CONTAINER_ENGINE_FULL) container rm --force --volumes docs-cilium
