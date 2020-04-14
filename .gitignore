@@ -69,3 +69,6 @@ test/bpf/_results
 
 # generated from make targets
 *.ok
+
+# Documentation
+Documentation/.config/
